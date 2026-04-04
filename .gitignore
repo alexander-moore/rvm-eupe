@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.so
+*.dylib
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Hydra outputs
+outputs/
+multirun/
+.hydra/
+
+# Checkpoints and model weights
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Logs
+logs/
+*.log
+wandb/
+runs/
+
+# Data (never commit large datasets)
+/data/
+datasets/
+
+# Compiled extensions
+*.c
+*.cpp
+*.cu
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Distribution
+*.tar.gz
+*.zip
+*.whl

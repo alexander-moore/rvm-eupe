@@ -1,0 +1,12 @@
+defaults:
+  - base
+
+optimizer:
+  lr: 1.5e-4
+
+scheduler:
+  warmup_steps: 10000
+  total_steps: 1000000
+
+batch_size_per_gpu: 32
+accumulate_grad_batches: 8   # 32 * 8 * 8 GPUs = 2048 effective

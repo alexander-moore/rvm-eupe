@@ -1,0 +1,29 @@
+optimizer:
+  name: adamw
+  lr: 1.5e-4
+  weight_decay: 0.05
+  betas: [0.9, 0.95]
+
+scheduler:
+  warmup_steps: 10000
+  total_steps: 1000000
+  min_lr_ratio: 0.0
+
+gradient:
+  clip_norm: 1.0
+
+precision: bf16          # bfloat16 mixed precision
+batch_size_per_gpu: 32
+accumulate_grad_batches: 8   # effective batch = 32 * 8 * num_gpus
+
+distributed:
+  strategy: fsdp
+  sharding: SHARD_GRAD_OP
+
+backbone:
+  decay: 0.75            # layerwise LR decay for EUPE encoder
+  freeze_steps: 5000     # Stage 1: freeze backbone for N steps, then unfreeze
+
+checkpoint:
+  save_every: 5000       # steps
+  keep_last: 3

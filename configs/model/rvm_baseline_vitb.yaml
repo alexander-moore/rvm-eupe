@@ -1,0 +1,12 @@
+# Ablation baseline: standard ViT-B from timm (no EUPE pretrain)
+# Uses the same recurrent + decoder, only encoder differs.
+arch: vitb_timm
+pretrained: true
+mask_ratio: 0.95
+num_source_frames: 4
+bptt_truncate: true
+decoder_dim: 512
+decoder_heads: 16
+decoder_blocks: 8
+gru_heads: 12
+gru_blocks: 1

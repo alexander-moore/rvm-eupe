@@ -1,0 +1,7 @@
+defaults:
+  - model: rvm_eupe_vitb
+  - data: mixed
+  - train: base
+  - _self_
+
+output_dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}

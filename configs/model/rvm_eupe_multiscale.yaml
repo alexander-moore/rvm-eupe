@@ -1,0 +1,18 @@
+# Ablation: EUPE ViT-B with multi-depth FPN feature fusion (A2 variant)
+arch: vitb
+weights: LVD1689M
+pretrained: true
+mask_ratio: 0.95
+num_source_frames: 4
+bptt_truncate: true
+decoder_dim: 512
+decoder_heads: 16
+decoder_blocks: 8
+gru_heads: 12
+gru_blocks: 1
+# Multi-scale adapter settings
+multiscale:
+  enabled: true
+  fusion: fpn         # "fpn" | "concat"
+  layers: [2, 5, 8, 11]   # FOUR_EVEN_INTERVALS for ViT-B (12 blocks)
+  out_dim: 768

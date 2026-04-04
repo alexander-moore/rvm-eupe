@@ -1,0 +1,30 @@
+# Training data index paths — update to match local dataset locations
+datasets:
+  ssv2:
+    index: /data/ssv2/index.json
+    frame_format: frames
+  kinetics700:
+    index: /data/kinetics700/index.json
+    frame_format: video
+  howto100m:
+    index: /data/howto100m/index.json
+    frame_format: video
+  yt8m:
+    index: /data/yt8m/index.json
+    frame_format: video
+  ytbb:
+    index: /data/ytbb/index.json
+    frame_format: video
+
+# Sampling weights (must match keys above)
+# Exact weights from RVM paper (Table in supplementary)
+weights:
+  ssv2: 0.056
+  kinetics700: 0.188
+  howto100m: 0.318
+  yt8m: 0.188
+  ytbb: 0.250
+
+# DataLoader settings
+num_workers: 8
+crop_size: 256

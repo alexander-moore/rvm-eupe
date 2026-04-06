@@ -1,6 +1,7 @@
 # Copyright (c) 2026 — RVM-EUPE authors.
 # DAVIS 2017 evaluation via non-parametric k-NN label propagation.
-# Matches the RVM paper protocol: frozen model, k=7, temperature τ=0.7.
+# Matches the RVM paper protocol (Table 8):
+#   frozen model, k=7, τ=0.7, context_frames=20, search_radius=20, 480p resolution.
 #
 # Reference: "Video Object Segmentation using Space-Time Memory Networks"
 # Protocol: for each query frame, propagate labels from all previous frames
@@ -97,19 +98,23 @@ def evaluate_davis(
     k: int = 7,
     tau: float = 0.7,
     context_frames: int = 20,
+    search_radius: int = 20,
     device: torch.device = torch.device("cuda"),
 ) -> Dict[str, float]:
     """
     Run non-parametric label propagation evaluation on DAVIS 2017.
+    Protocol matches RVM paper Table 8: k=7, τ=0.7, 20 context frames,
+    search_radius=20 (spatial locality window in patch units), 480p resolution.
 
     Args:
         model:           Frozen RecurrentVideoMAE (only encoder is used here).
         davis_root:      Path to DAVIS 2017 dataset root.
         split:           "val" or "test-dev".
         patch_size:      Patch size (16 for all EUPE ViT variants).
-        k:               k-NN neighbours.
-        tau:             Temperature for softmax.
-        context_frames:  Number of past frames kept in memory (RVM paper uses all).
+        k:               k-NN neighbours (paper: 7).
+        tau:             Temperature for softmax (paper: 0.7).
+        context_frames:  Past frames in memory (paper: 20).
+        search_radius:   Spatial search window in patch units (paper: 20).
         device:          Compute device.
 
     Returns:

@@ -22,16 +22,19 @@ class VideoRandomResizedCrop:
     def __init__(
         self,
         size: int = 256,
-        scale: Tuple[float, float] = (0.5, 1.0),
-        ratio: Tuple[float, float] = (3 / 4, 4 / 3),
+        scale: Tuple[float, float] = (0.3, 1.0),   # RVM paper Supp. Section 8
+        ratio: Tuple[float, float] = (0.75, 1.25),  # RVM paper Supp. Section 8
+        interpolation=TF.InterpolationMode.BICUBIC,  # RVM paper Supp. Section 8
     ) -> None:
         self.size = size
         self.scale = scale
         self.ratio = ratio
+        self.interpolation = interpolation
 
     def __call__(self, frames: List[Image.Image]) -> List[Image.Image]:
         i, j, h, w = T.RandomResizedCrop.get_params(frames[0], self.scale, self.ratio)
-        return [TF.resized_crop(f, i, j, h, w, (self.size, self.size)) for f in frames]
+        return [TF.resized_crop(f, i, j, h, w, (self.size, self.size),
+                                interpolation=self.interpolation) for f in frames]
 
 
 class VideoRandomHorizontalFlip:
@@ -103,6 +106,25 @@ class Compose:
 
 
 def build_train_transforms(crop_size: int = 256) -> Compose:
+    """
+    Pretraining augmentations per RVM paper Supplementary Section 8:
+      - RandomResizedCrop: scale=(0.3,1.0), ratio=(0.75,1.25), bicubic
+      - RandomHorizontalFlip: p=0.5
+    No color jitter during pretraining (only used for downstream readout tasks).
+    """
+    return Compose([
+        VideoRandomResizedCrop(size=crop_size),
+        VideoRandomHorizontalFlip(p=0.5),
+        VideoToTensor(),
+        VideoNormalize(),
+    ])
+
+
+def build_readout_transforms(crop_size: int = 224) -> Compose:
+    """
+    Augmentations for training downstream readout heads (SSv2, K700):
+      same as pretraining + color jitter (brightness, contrast, saturation, hue).
+    """
     return Compose([
         VideoRandomResizedCrop(size=crop_size),
         VideoRandomHorizontalFlip(p=0.5),

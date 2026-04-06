@@ -1,12 +1,12 @@
 # Copyright (c) 2026 — RVM-EUPE authors.
 # Top-level model: Recurrent Video MAE with EUPE backbone.
 #
-# Forward pass orchestration:
-#   1. Encode each source frame with EUPE encoder → e_t tokens
-#   2. Step TransformerGRU over source frames → hidden state s_T
-#   3. Apply random mask to target frame tokens
-#   4. Decode masked target using s_T as memory → pixel predictions
-#   5. L2 reconstruction loss on masked pixels
+# Forward pass orchestration (per RVM paper Section 3):
+#   1. Encode each of 4 source frames → step TransformerGRU → hidden state s_T
+#   2. Encode each of 4 target frames (independently sampled at Δt ∈ [4,48])
+#   3. Apply 95% random mask to each target frame
+#   4. Decode each masked target using shared s_T as cross-attention memory
+#   5. L2 loss over ALL patch positions (no patch normalisation), averaged over 4 targets
 
 import math
 from typing import List, Optional, Tuple
@@ -93,56 +93,74 @@ class RecurrentVideoMAE(nn.Module):
 
     def forward(
         self,
-        source_frames: List[Tensor],  # list of num_source_frames tensors [B, 3, H, W]
-        target_frame: Tensor,         # [B, 3, H, W]
+        source_frames: List[Tensor],   # list of num_source_frames tensors [B, 3, H, W]
+        target_frames: List[Tensor],   # list of 4 target tensors [B, 3, H, W]
     ) -> dict:
         """
-        Returns dict with keys: 'loss', 'pred', 'mask'.
+        Per RVM paper: 4 source frames build the recurrent state s_T; 4 target
+        frames (each independently masked at 95%) are decoded from the same s_T.
+        Loss is L2 over ALL patch positions, averaged across the 4 targets.
+
+        Returns dict with keys: 'loss', 'preds' (list), 'masks' (list).
         """
         assert len(source_frames) == self.num_source_frames, (
             f"Expected {self.num_source_frames} source frames, got {len(source_frames)}"
         )
 
-        B, C, H, W = target_frame.shape
         patch_size = self.encoder.patch_size
-
-        # Pad target to match what the encoder will pad source frames to
         from eupe.eval.depth.models.embed import CenterPadding
         pad = CenterPadding(multiple=patch_size)
-        target_padded = pad(target_frame)
-        _, _, H_pad, W_pad = target_padded.shape
+
+        # Determine grid from first source frame
+        B = source_frames[0].shape[0]
+        sample_padded = pad(source_frames[0])
+        _, _, H_pad, W_pad = sample_padded.shape
         grid_h = H_pad // patch_size
         grid_w = W_pad // patch_size
         N = grid_h * grid_w
 
         # ---- Step 1: Encode source frames + recurrent aggregation ----
+        # No within-sequence detach — backprop flows through all 4 source steps.
+        # bptt_truncate detaches s_T after the full sequence, preventing cross-
+        # batch recurrence (which doesn't exist here since s_0 = zeros always).
         s: Optional[Tensor] = None
         for frame in source_frames:
-            e_t = self.encoder(frame)              # [B, N, D]
+            e_t = self.encoder(frame)        # [B, N, D]
             s, _ = self.recurrent(e_t, s)
-            if self.bptt_truncate:
-                s = s.detach()
 
-        # ---- Step 2: Encode target frame (for visible tokens) ----
-        target_tokens = self.encoder(target_padded)  # [B, N, D]
+        if self.bptt_truncate:
+            s = s.detach()
 
-        # ---- Step 3: Random mask on target tokens ----
-        mask = _random_mask(B, N, self.mask_ratio, target_frame.device)  # [B, N] bool
+        # ---- Steps 2–4: Encode, mask, decode each target frame ----
+        total_loss = torch.tensor(0.0, device=source_frames[0].device)
+        preds, masks = [], []
 
-        # ---- Step 4: Decode ----
-        pred, mask = self.decoder(
-            target_tokens=target_tokens,
-            mask=mask,
-            memory=s,
-            grid_hw=(grid_h, grid_w),
-        )
+        for tgt in target_frames:
+            tgt_padded = pad(tgt)
 
-        # ---- Step 5: Patchify target for loss computation ----
-        target_patches = _patchify(target_padded, patch_size)  # [B, N, patch_pixels]
+            # Encode unmasked target tokens
+            target_tokens = self.encoder(tgt_padded)            # [B, N, D]
 
-        loss = MAEDecoder.reconstruction_loss(pred, target_patches, mask)
+            # Independent 95% random mask per target
+            mask = _random_mask(B, N, self.mask_ratio, tgt.device)  # [B, N] bool
 
-        return {"loss": loss, "pred": pred, "mask": mask}
+            # Decode — all N positions predicted
+            pred, mask = self.decoder(
+                target_tokens=target_tokens,
+                mask=mask,
+                memory=s,
+                grid_hw=(grid_h, grid_w),
+            )
+
+            # L2 over all patch positions (paper: "entire reconstructed image pixels")
+            target_patches = _patchify(tgt_padded, patch_size)  # [B, N, patch_pixels]
+            total_loss = total_loss + MAEDecoder.reconstruction_loss(pred, target_patches)
+
+            preds.append(pred)
+            masks.append(mask)
+
+        loss = total_loss / len(target_frames)
+        return {"loss": loss, "preds": preds, "masks": masks}
 
     # ------------------------------------------------------------------
     # Convenience: freeze/unfreeze for staged training

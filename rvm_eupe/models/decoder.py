@@ -1,9 +1,9 @@
 # Copyright (c) 2026 — RVM-EUPE authors.
 # MAE Decoder — PyTorch port from RVM (arxiv 2512.13684).
 #
-# Architecture (per paper):
-#   8 blocks, decoder_dim=512, 16 heads
-#   Per block: cross-attention (target → memory)  →  FFN  →  self-attention
+# Architecture (per paper, Table 6):
+#   4 blocks, decoder_dim=512, 8 heads
+#   Per block: cross-attention (target → s_t)  →  FFN  →  self-attention
 #   All pre-norm.
 #
 # The decoder receives:
@@ -103,7 +103,11 @@ class _FFN(nn.Module):
 
 class MAEDecoderBlock(nn.Module):
     """
-    One decoder block: cross-attn (target→memory) → FFN → self-attn  (all pre-norm).
+    One decoder block (Table 6, RVM paper):
+      1. cross-attn: target tokens (Q) attend to recurrent state s_t (K,V)
+      2. FFN
+      3. self-attn: target tokens attend to each other
+    All pre-norm.
     """
 
     def __init__(self, dim: int, num_heads: int, ffn_ratio: float = 4.0) -> None:
@@ -119,8 +123,11 @@ class MAEDecoderBlock(nn.Module):
         self.self_attn = _SelfAttn(dim, num_heads)
 
     def forward(self, x: Tensor, memory: Tensor) -> Tensor:
+        # 1. cross-attention to recurrent memory
         x = x + self.cross_attn(self.norm_q(x), self.norm_ctx(memory))
+        # 2. FFN
         x = x + self.ffn(self.norm_ffn(x))
+        # 3. self-attention among target tokens
         x = x + self.self_attn(self.norm_self(x))
         return x
 
@@ -136,9 +143,9 @@ class MAEDecoder(nn.Module):
 
     Args:
         encoder_dim:  Encoder / recurrent state feature dimension (e.g. 768).
-        decoder_dim:  Internal decoder width (default 512, per RVM paper).
-        num_heads:    Attention heads (default 16, per RVM paper).
-        num_blocks:   Number of decoder blocks (default 8).
+        decoder_dim:  Internal decoder width (default 512, per RVM paper Table 6).
+        num_heads:    Attention heads (default 8, per RVM paper Table 6).
+        num_blocks:   Number of decoder blocks (default 4, per RVM paper Table 6).
         patch_size:   Spatial patch side length in pixels (default 16).
         ffn_ratio:    FFN expansion ratio (default 4.0).
     """
@@ -147,8 +154,8 @@ class MAEDecoder(nn.Module):
         self,
         encoder_dim: int = 768,
         decoder_dim: int = 512,
-        num_heads: int = 16,
-        num_blocks: int = 8,
+        num_heads: int = 8,
+        num_blocks: int = 4,
         patch_size: int = 16,
         ffn_ratio: float = 4.0,
     ) -> None:
@@ -243,8 +250,11 @@ class MAEDecoder(nn.Module):
     def reconstruction_loss(
         pred: Tensor,   # [B, N, patch_pixels]
         target: Tensor, # [B, N, patch_pixels]
-        mask: Tensor,   # [B, N] bool — True = masked
     ) -> Tensor:
-        """Mean L2 loss over masked positions (no patch normalisation)."""
-        loss = F.mse_loss(pred[mask], target[mask])
-        return loss
+        """
+        L2 loss over ALL patch positions — entire reconstructed image.
+        Paper (Section 3.1): "simple L2 loss over the entire reconstructed and
+        target image pixels (unlike prior work we do not use patch-level
+        normalisation)."
+        """
+        return F.mse_loss(pred, target)

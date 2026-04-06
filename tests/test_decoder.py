@@ -48,9 +48,8 @@ def test_decoder_loss_is_scalar():
     B, N = 2, 196
     pred = torch.randn(B, N, 768)
     target = torch.randn(B, N, 768)
-    mask = torch.zeros(B, N, dtype=torch.bool)
-    mask[:, :186] = True
-    loss = MAEDecoder.reconstruction_loss(pred, target, mask)
+    # Loss is now over ALL positions (no mask arg) — paper: "entire image pixels"
+    loss = MAEDecoder.reconstruction_loss(pred, target)
     assert loss.ndim == 0
     assert loss.item() > 0
 
@@ -102,15 +101,16 @@ def test_recurrent_video_mae_forward():
 
     B = 2
     source_frames = [torch.randn(B, 3, 224, 224) for _ in range(4)]
-    target_frame = torch.randn(B, 3, 224, 224)
+    target_frames = [torch.randn(B, 3, 224, 224) for _ in range(4)]
 
     with torch.no_grad():
-        out = model(source_frames, target_frame)
+        out = model(source_frames, target_frames)
 
     assert "loss" in out
     assert out["loss"].ndim == 0
     assert not torch.isnan(out["loss"])
-    assert out["mask"].shape == (B, 196)
+    assert len(out["masks"]) == 4
+    assert out["masks"][0].shape == (B, 196)
 
 
 def test_freeze_encoder():

@@ -144,15 +144,14 @@ def main(cfg: DictConfig) -> None:
         )
 
     # ---- Optimizer ----
-    from rvm_eupe.optim.schedulers import get_layerwise_param_groups, cosine_warmup_schedule
+    from rvm_eupe.optim.schedulers import cosine_warmup_schedule
 
-    param_groups = get_layerwise_param_groups(
-        model, base_lr=cfg.train.optimizer.lr,
-        weight_decay=cfg.train.optimizer.weight_decay,
-        backbone_decay=cfg.train.backbone.decay,
-    )
+    # RVM paper does not use layerwise LR decay — single LR for all params.
+    # Our backbone freeze (Stage 1) achieves the same calibration effect.
     optimizer = torch.optim.AdamW(
-        param_groups,
+        model.parameters(),
+        lr=cfg.train.optimizer.lr,
+        weight_decay=cfg.train.optimizer.weight_decay,
         betas=tuple(cfg.train.optimizer.betas),
     )
     scheduler = cosine_warmup_schedule(
@@ -189,10 +188,13 @@ def main(cfg: DictConfig) -> None:
                 batch["source_frames"][:, t].to(device)
                 for t in range(cfg.model.num_source_frames)
             ]
-            target_frame = batch["target_frame"].to(device)
+            target_frames = [
+                batch["target_frames"][:, t].to(device)
+                for t in range(cfg.model.get("num_target_frames", 4))
+            ]
 
             with torch.autocast(device_type="cuda", dtype=amp_dtype):
-                out = model(source_frames, target_frame)
+                out = model(source_frames, target_frames)
                 loss = out["loss"] / accum
 
             if use_bf16:

@@ -97,14 +97,17 @@ class CrossAttention(nn.Module):
 
 class TransformerBlock(nn.Module):
     """
-    One block of the recurrent aggregator Tx:
-      cross-attention (query=e_t, context=gated_state)  [pre-norm on query]
-      FFN                                                [pre-norm]
-      self-attention                                     [pre-norm]
+    One block of the recurrent aggregator Tx (Listing 2 in RVM paper):
+      1. self-attention                                     [pre-norm]  — intra-frame token mixing
+      2. cross-attention (query=e_t, context=gated_state)  [pre-norm]  — attend to recurrent memory
+      3. FFN                                                [pre-norm]
     """
 
     def __init__(self, dim: int, num_heads: int, ffn_ratio: float = 4.0) -> None:
         super().__init__()
+        self.norm_self = nn.LayerNorm(dim)
+        self.self_attn = SelfAttention(dim, num_heads)
+
         self.norm_q = nn.LayerNorm(dim)
         self.norm_ctx = nn.LayerNorm(dim)
         self.cross_attn = CrossAttention(dim, num_heads)
@@ -112,16 +115,13 @@ class TransformerBlock(nn.Module):
         self.norm_ffn = nn.LayerNorm(dim)
         self.ffn = FFN(dim, ffn_ratio)
 
-        self.norm_self = nn.LayerNorm(dim)
-        self.self_attn = SelfAttention(dim, num_heads)
-
     def forward(self, x: Tensor, context: Tensor) -> Tensor:
-        # cross-attention (pre-norm on both query and context)
-        x = x + self.cross_attn(self.norm_q(x), self.norm_ctx(context))
-        # FFN
-        x = x + self.ffn(self.norm_ffn(x))
-        # self-attention
+        # 1. self-attention (intra-frame)
         x = x + self.self_attn(self.norm_self(x))
+        # 2. cross-attention to gated recurrent state
+        x = x + self.cross_attn(self.norm_q(x), self.norm_ctx(context))
+        # 3. FFN
+        x = x + self.ffn(self.norm_ffn(x))
         return x
 
 

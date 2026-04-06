@@ -1,10 +1,10 @@
 # Copyright (c) 2026 — RVM-EUPE authors.
 # Base video clip sampler.
 #
-# Clip sampling strategy (matching RVM paper):
-#   - 4 consecutive source frames (stride configurable, default 1)
-#   - 1 target frame sampled uniformly in [gap_min, gap_max] frames after the
-#     last source frame
+# Clip sampling strategy (matching RVM paper Section 3 / Supplementary Table 4):
+#   - 4 consecutive source frames (stride 1)
+#   - 4 target frames, each independently sampled at Δt ∈ [gap_min, gap_max]
+#     frames after the last source frame (default gap_min=4, gap_max=48)
 #
 # Dataset format: each entry is a path to a video file (mp4/avi/webm) or a
 # directory of JPEG frames.  A JSON/CSV index file lists these paths.
@@ -80,6 +80,7 @@ class VideoClipDataset(Dataset):
         index_path: str,
         transform: Optional[Callable] = None,
         num_source_frames: int = 4,
+        num_target_frames: int = 4,
         source_stride: int = 1,
         gap_min: int = 4,
         gap_max: int = 48,
@@ -88,6 +89,7 @@ class VideoClipDataset(Dataset):
     ) -> None:
         self.transform = transform
         self.num_source_frames = num_source_frames
+        self.num_target_frames = num_target_frames
         self.source_stride = source_stride
         self.gap_min = gap_min
         self.gap_max = gap_max
@@ -103,10 +105,12 @@ class VideoClipDataset(Dataset):
     def __len__(self) -> int:
         return len(self.entries)
 
-    def _sample_indices(self, num_frames: int) -> Tuple[List[int], int]:
+    def _sample_indices(self, num_frames: int) -> Tuple[List[int], List[int]]:
         """
-        Sample 4 consecutive source indices and 1 target index.
-        Returns (source_indices, target_index).
+        Sample 4 consecutive source indices and 4 independent target indices.
+        Each target is drawn with gap Δt ~ Uniform[gap_min, gap_max] from the
+        last source frame (RVM paper Section 3 / Supplementary Table 4).
+        Returns (source_indices, target_indices).
         """
         required = (self.num_source_frames - 1) * self.source_stride + 1
         latest_start = num_frames - required - self.gap_min
@@ -117,10 +121,14 @@ class VideoClipDataset(Dataset):
         source_indices = [start + i * self.source_stride for i in range(self.num_source_frames)]
         last_source = source_indices[-1]
 
-        gap = random.randint(self.gap_min, min(self.gap_max, num_frames - last_source - 1))
-        target_index = last_source + gap
+        max_gap = min(self.gap_max, num_frames - last_source - 1)
+        max_gap = max(max_gap, self.gap_min)  # guard for very short clips
+        target_indices = [
+            last_source + random.randint(self.gap_min, max_gap)
+            for _ in range(self.num_target_frames)
+        ]
 
-        return source_indices, target_index
+        return source_indices, target_indices
 
     def _load_frames(self, entry: dict, indices: List[int]) -> List[Image.Image]:
         path = entry["path"]
@@ -135,20 +143,20 @@ class VideoClipDataset(Dataset):
                 entry = self.entries[(idx + attempt) % len(self.entries)]
                 num_frames = entry.get("num_frames", 300)
 
-                source_indices, target_index = self._sample_indices(num_frames)
-                all_indices = source_indices + [target_index]
+                source_indices, target_indices = self._sample_indices(num_frames)
+                all_indices = source_indices + target_indices
 
                 frames = self._load_frames(entry, all_indices)
 
                 if self.transform is not None:
                     frames = self.transform(frames)
 
-                source_frames = frames[: self.num_source_frames]   # list of tensors [3, H, W]
-                target_frame  = frames[self.num_source_frames]     # tensor [3, H, W]
+                source_frames = frames[: self.num_source_frames]           # list of [3, H, W]
+                target_frames = frames[self.num_source_frames :]           # list of [3, H, W]
 
                 return {
-                    "source_frames": torch.stack(source_frames),  # [T, 3, H, W]
-                    "target_frame":  target_frame,                 # [3, H, W]
+                    "source_frames": torch.stack(source_frames),  # [T_src, 3, H, W]
+                    "target_frames": torch.stack(target_frames),  # [T_tgt, 3, H, W]
                 }
             except Exception:
                 continue
@@ -156,6 +164,6 @@ class VideoClipDataset(Dataset):
 
 
 def collate_fn(batch: List[dict]) -> dict:
-    source_frames = torch.stack([b["source_frames"] for b in batch])  # [B, T, 3, H, W]
-    target_frame  = torch.stack([b["target_frame"]  for b in batch])  # [B, 3, H, W]
-    return {"source_frames": source_frames, "target_frame": target_frame}
+    source_frames = torch.stack([b["source_frames"] for b in batch])  # [B, T_src, 3, H, W]
+    target_frames = torch.stack([b["target_frames"] for b in batch])  # [B, T_tgt, 3, H, W]
+    return {"source_frames": source_frames, "target_frames": target_frames}

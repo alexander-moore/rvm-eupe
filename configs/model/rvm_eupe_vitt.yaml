@@ -5,7 +5,8 @@ mask_ratio: 0.95
 num_source_frames: 4
 bptt_truncate: true
 decoder_dim: 512
-decoder_heads: 16
-decoder_blocks: 8
+num_target_frames: 4
+decoder_heads: 8
+decoder_blocks: 4
 gru_heads: 3
-gru_blocks: 1
+gru_blocks: 4

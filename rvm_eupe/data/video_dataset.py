@@ -32,7 +32,10 @@ def _load_video_frames_decord(
     import decord  # optional dep; only used when videos are available
     decord.bridge.set_bridge("torch")
     vr = decord.VideoReader(video_path, num_threads=1)
-    frames = vr.get_batch(frame_indices)  # [T, H, W, 3] uint8
+    actual_len = len(vr)
+    # Clamp indices to actual video length (index may have stale/default num_frames)
+    clamped = [min(i, actual_len - 1) for i in frame_indices]
+    frames = vr.get_batch(clamped)  # [T, H, W, 3] uint8
     return [Image.fromarray(f.numpy()) for f in frames]
 
 
@@ -127,24 +130,29 @@ class VideoClipDataset(Dataset):
             return _load_frame_dir(path, indices)
 
     def __getitem__(self, idx: int) -> dict:
-        entry = self.entries[idx]
-        num_frames = entry.get("num_frames", 300)
+        for attempt in range(5):
+            try:
+                entry = self.entries[(idx + attempt) % len(self.entries)]
+                num_frames = entry.get("num_frames", 300)
 
-        source_indices, target_index = self._sample_indices(num_frames)
-        all_indices = source_indices + [target_index]
+                source_indices, target_index = self._sample_indices(num_frames)
+                all_indices = source_indices + [target_index]
 
-        frames = self._load_frames(entry, all_indices)
+                frames = self._load_frames(entry, all_indices)
 
-        if self.transform is not None:
-            frames = self.transform(frames)
+                if self.transform is not None:
+                    frames = self.transform(frames)
 
-        source_frames = frames[: self.num_source_frames]   # list of tensors [3, H, W]
-        target_frame  = frames[self.num_source_frames]     # tensor [3, H, W]
+                source_frames = frames[: self.num_source_frames]   # list of tensors [3, H, W]
+                target_frame  = frames[self.num_source_frames]     # tensor [3, H, W]
 
-        return {
-            "source_frames": torch.stack(source_frames),  # [T, 3, H, W]
-            "target_frame":  target_frame,                 # [3, H, W]
-        }
+                return {
+                    "source_frames": torch.stack(source_frames),  # [T, 3, H, W]
+                    "target_frame":  target_frame,                 # [3, H, W]
+                }
+            except Exception:
+                continue
+        raise RuntimeError(f"Failed to load clip after 5 attempts, starting at idx={idx}")
 
 
 def collate_fn(batch: List[dict]) -> dict:

@@ -1,0 +1,28 @@
+optimizer:
+  name: adamw
+  lr: 1.5e-4
+  weight_decay: 0.05
+  betas: [0.9, 0.95]
+
+scheduler:
+  warmup_steps: 50
+  total_steps: 1000
+  min_lr_ratio: 0.0
+
+gradient:
+  clip_norm: 1.0
+
+precision: bf16
+batch_size_per_gpu: 4
+accumulate_grad_batches: 1   # no accumulation for smoke test
+
+distributed:
+  strategy: none
+
+backbone:
+  decay: 0.75
+  freeze_steps: 1000          # keep encoder frozen for entire smoke run
+
+checkpoint:
+  save_every: 500
+  keep_last: 2

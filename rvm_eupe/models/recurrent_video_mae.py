@@ -195,7 +195,11 @@ class RecurrentVideoMAE(nn.Module):
         if gru_heads is None:
             gru_heads = default_heads
 
-        w = Weights[weights]
+        # weights can be a Weights enum name ("LVD1689M") or a local file path
+        try:
+            w = Weights[weights]
+        except KeyError:
+            w = weights  # treat as a direct path / URL string
         backbone = factory_fn(pretrained=pretrained, weights=w)
 
         encoder = EUPEEncoderWrapper(backbone, use_pre_recurrent_norm=True)

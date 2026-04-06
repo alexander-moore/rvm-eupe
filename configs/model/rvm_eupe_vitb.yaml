@@ -1,6 +1,6 @@
 # Primary model: EUPE ViT-B/16 encoder (768d)
 arch: vitb
-weights: LVD1689M
+weights: /home/farm/.cache/torch/hub/checkpoints/EUPE-ViT-B.pt
 pretrained: true
 mask_ratio: 0.95
 num_source_frames: 4

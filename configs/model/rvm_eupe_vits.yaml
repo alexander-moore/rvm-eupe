@@ -1,5 +1,5 @@
 arch: vits
-weights: LVD1689M
+weights: /home/farm/.cache/torch/hub/checkpoints/EUPE-ViT-S.pt
 pretrained: true
 mask_ratio: 0.95
 num_source_frames: 4

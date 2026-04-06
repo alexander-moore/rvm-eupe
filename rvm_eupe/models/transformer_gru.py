@@ -8,8 +8,8 @@
 #   ĥ_t = Tx( q=ê_t,  kv=r_t ⊙ s_{t-1} )               [candidate via cross-attn block]
 #   s_t = (1 − u_t) ⊙ s_{t-1}  +  u_t ⊙ ĥ_t            [state update]
 #
-# The cross-attention "block" Tx follows the per-block structure from the paper:
-#   cross-attention  →  FFN  →  self-attention  (all pre-norm)
+# Each TransformerBlock follows Listing 2 of the paper (4 blocks total):
+#   self-attention  →  cross-attention  →  FFN  (all pre-norm)
 
 import math
 from typing import Optional, Tuple
@@ -143,8 +143,7 @@ class TransformerGRU(nn.Module):
         embed_dim:    Must match the encoder output dimension D.
         num_heads:    Attention heads inside the cross-attention block.
         num_blocks:   How many TransformerBlock passes to use for computing ĥ_t.
-                      Paper uses 1 (the cross-attn block with its FFN+self-attn
-                      counts as a single compound block).
+                      Paper uses 4 for all model sizes (S/B/L/H).
         ffn_ratio:    MLP expansion ratio inside the block.
     """
 
@@ -152,7 +151,7 @@ class TransformerGRU(nn.Module):
         self,
         embed_dim: int,
         num_heads: int,
-        num_blocks: int = 1,
+        num_blocks: int = 4,
         ffn_ratio: float = 4.0,
     ) -> None:
         super().__init__()

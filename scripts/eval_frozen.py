@@ -171,7 +171,7 @@ def main(cfg: DictConfig) -> None:
 def _build_action_loaders(root, cfg, num_classes):
     """Return (train_loader, val_loader) for action classification."""
     from rvm_eupe.data.video_dataset import VideoClipDataset, collate_fn
-    from rvm_eupe.data.transforms import build_train_transforms, build_eval_transforms
+    from rvm_eupe.data.transforms import build_readout_transforms, build_eval_transforms
     from torch.utils.data import DataLoader
 
     def _make_loader(split, transform):
@@ -181,7 +181,8 @@ def _build_action_loaders(root, cfg, num_classes):
         ds = VideoClipDataset(index, transform=transform)
         return DataLoader(ds, batch_size=32, num_workers=4, collate_fn=collate_fn)
 
-    return (_make_loader("train", build_train_transforms()),
+    # Readout training uses color jitter (paper: brightness/contrast/saturation/hue)
+    return (_make_loader("train", build_readout_transforms()),
             _make_loader("val",   build_eval_transforms()))
 
 

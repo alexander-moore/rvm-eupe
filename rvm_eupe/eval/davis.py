@@ -29,9 +29,14 @@ def propagate_labels_knn(
     memory_labels:  Tensor,   # [N_m, C]  one-hot labels in memory
     k: int = 7,
     tau: float = 0.7,
+    query_grid_hw: tuple = None,   # (H, W) in patch units for query frame
+    memory_grid_hw: tuple = None,  # (H, W) in patch units for each memory frame
+    search_radius: int = 20,       # spatial locality window in patch units (paper: 20)
 ) -> Tensor:
     """
     For each query token, find k nearest neighbours in memory and soft-vote labels.
+    When query_grid_hw and memory_grid_hw are provided, similarity is masked to
+    tokens within search_radius patch units (spatial locality, RVM paper Table 8).
 
     Returns:
         pred_labels: [N_q, C]  soft label predictions
@@ -40,6 +45,22 @@ def propagate_labels_knn(
     q = F.normalize(query_features, dim=-1)
     m = F.normalize(memory_features, dim=-1)
     sim = (q @ m.T) / tau   # [N_q, N_m]
+
+    # Spatial locality mask — restrict search to ±search_radius patch window
+    if query_grid_hw is not None and memory_grid_hw is not None:
+        qH, qW = query_grid_hw
+        mH, mW = memory_grid_hw
+        # Query patch coordinates
+        qy = torch.arange(qH, device=sim.device).repeat_interleave(qW)   # [N_q]
+        qx = torch.arange(qW, device=sim.device).repeat(qH)
+        # Memory patch coordinates (one frame worth; repeat for context_frames)
+        n_mem_frames = memory_features.shape[0] // (mH * mW)
+        my = torch.arange(mH, device=sim.device).repeat_interleave(mW).repeat(n_mem_frames)
+        mx = torch.arange(mW, device=sim.device).repeat(mH * n_mem_frames)
+        # Distance mask
+        dist = ((qy[:, None] - my[None, :]).abs() +
+                (qx[:, None] - mx[None, :]).abs())  # [N_q, N_m]  L1 in patch coords
+        sim = sim.masked_fill(dist > search_radius, float("-inf"))
 
     # Top-k softmax
     topk_sim, topk_idx = sim.topk(k, dim=-1)           # [N_q, k]

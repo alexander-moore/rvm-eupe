@@ -191,10 +191,10 @@ class RecurrentVideoMAE(nn.Module):
         num_source_frames: int = 4,
         bptt_truncate: bool = True,
         decoder_dim: int = 512,
-        decoder_heads: int = 16,
-        decoder_blocks: int = 8,
+        decoder_heads: int = 8,
+        decoder_blocks: int = 4,
         gru_heads: Optional[int] = None,
-        gru_blocks: int = 1,
+        gru_blocks: int = 4,
     ) -> "RecurrentVideoMAE":
         """
         Convenience factory.  arch in {"vitt", "vits", "vitb"}.

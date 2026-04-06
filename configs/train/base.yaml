@@ -21,8 +21,10 @@ distributed:
   sharding: SHARD_GRAD_OP
 
 backbone:
-  decay: 0.75            # layerwise LR decay for EUPE encoder
-  freeze_steps: 5000     # Stage 1: freeze backbone for N steps, then unfreeze
+  # Note: RVM paper does not use layerwise LR decay.
+  # freeze_steps is our own addition: calibrates gate weights to pretrained EUPE
+  # features before full end-to-end training begins (not in the original paper).
+  freeze_steps: 5000     # Stage 1: freeze EUPE encoder for N steps, then unfreeze
 
 checkpoint:
   save_every: 5000       # steps

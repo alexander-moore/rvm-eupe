@@ -101,6 +101,11 @@ class RecurrentVideoMAE(nn.Module):
         frames (each independently masked at 95%) are decoded from the same s_T.
         Loss is L2 over ALL patch positions, averaged across the 4 targets.
 
+        Performance: source frames are batched through the encoder in one pass
+        [B*T_src, 3, H, W] then split for sequential GRU. Target frames are also
+        batched [B*T_tgt, 3, H, W] for one encoder + decoder pass since they share
+        s_T and are fully independent. This cuts encoder calls from 8 to 2 per step.
+
         Returns dict with keys: 'loss', 'preds' (list), 'masks' (list).
         """
         assert len(source_frames) == self.num_source_frames, (
@@ -111,55 +116,53 @@ class RecurrentVideoMAE(nn.Module):
         from eupe.eval.depth.models.embed import CenterPadding
         pad = CenterPadding(multiple=patch_size)
 
-        # Determine grid from first source frame
         B = source_frames[0].shape[0]
-        sample_padded = pad(source_frames[0])
-        _, _, H_pad, W_pad = sample_padded.shape
+        T_src = len(source_frames)
+        T_tgt = len(target_frames)
+        device = source_frames[0].device
+
+        # Grid size (all frames same spatial dims after transforms)
+        _sample = pad(source_frames[0])
+        _, _, H_pad, W_pad = _sample.shape
         grid_h = H_pad // patch_size
         grid_w = W_pad // patch_size
         N = grid_h * grid_w
 
-        # ---- Step 1: Encode source frames + recurrent aggregation ----
-        # No within-sequence detach — backprop flows through all 4 source steps.
-        # bptt_truncate detaches s_T after the full sequence, preventing cross-
-        # batch recurrence (which doesn't exist here since s_0 = zeros always).
+        # ---- Step 1: Encode all source frames in one batched pass ----
+        # Encoder is stateless — [B*T_src, 3, H, W] is equivalent to T_src separate calls.
+        # GRU still processes sequentially (hidden-state dependency).
+        all_src = torch.cat(source_frames, dim=0)          # [B*T_src, 3, H, W]
+        all_src_enc = self.encoder(all_src)                 # [B*T_src, N, D]
+        src_encodings = all_src_enc.chunk(T_src, dim=0)    # T_src × [B, N, D]
+
         s: Optional[Tensor] = None
-        for frame in source_frames:
-            e_t = self.encoder(frame)        # [B, N, D]
+        for e_t in src_encodings:
             s, _ = self.recurrent(e_t, s)
 
         if self.bptt_truncate:
             s = s.detach()
 
-        # ---- Steps 2–4: Encode, mask, decode each target frame ----
-        total_loss = torch.tensor(0.0, device=source_frames[0].device)
-        preds, masks = [], []
+        # ---- Step 2: Encode + decode all target frames in one batched pass ----
+        # All T_tgt targets share s_T and are fully independent — fold into batch dim.
+        all_tgt_padded = torch.cat([pad(f) for f in target_frames], dim=0)  # [B*T_tgt, 3, H, W]
+        all_tgt_tokens = self.encoder(all_tgt_padded)                       # [B*T_tgt, N, D]
 
-        for tgt in target_frames:
-            tgt_padded = pad(tgt)
+        masks_in = _random_mask(B * T_tgt, N, self.mask_ratio, device)     # [B*T_tgt, N]
+        s_exp = s.repeat(T_tgt, 1, 1)                                       # [B*T_tgt, N, D]
 
-            # Encode unmasked target tokens
-            target_tokens = self.encoder(tgt_padded)            # [B, N, D]
+        pred_all, masks_out = self.decoder(
+            target_tokens=all_tgt_tokens,
+            mask=masks_in,
+            memory=s_exp,
+            grid_hw=(grid_h, grid_w),
+        )   # pred_all: [B*T_tgt, N, patch_pixels]
 
-            # Independent 95% random mask per target
-            mask = _random_mask(B, N, self.mask_ratio, tgt.device)  # [B, N] bool
+        all_tgt_patches = _patchify(all_tgt_padded, patch_size)             # [B*T_tgt, N, P]
+        loss = MAEDecoder.reconstruction_loss(pred_all, all_tgt_patches)
 
-            # Decode — all N positions predicted
-            pred, mask = self.decoder(
-                target_tokens=target_tokens,
-                mask=mask,
-                memory=s,
-                grid_hw=(grid_h, grid_w),
-            )
+        preds = list(pred_all.chunk(T_tgt, dim=0))
+        masks = list(masks_out.chunk(T_tgt, dim=0))
 
-            # L2 over all patch positions (paper: "entire reconstructed image pixels")
-            target_patches = _patchify(tgt_padded, patch_size)  # [B, N, patch_pixels]
-            total_loss = total_loss + MAEDecoder.reconstruction_loss(pred, target_patches)
-
-            preds.append(pred)
-            masks.append(mask)
-
-        loss = total_loss / len(target_frames)
         return {"loss": loss, "preds": preds, "masks": masks}
 
     # ------------------------------------------------------------------

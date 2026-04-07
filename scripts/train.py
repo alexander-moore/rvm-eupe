@@ -110,6 +110,7 @@ def build_dataloader(cfg: DictConfig, transform) -> DataLoader:
         collate_fn=collate_fn,
         pin_memory=True,
         drop_last=True,
+        persistent_workers=cfg.data.num_workers > 0,
     )
 
 
@@ -143,6 +144,12 @@ def main(cfg: DictConfig) -> None:
             device_id=torch.cuda.current_device(),
         )
 
+    # torch.compile — fuses kernels, eliminates Python overhead (~20-30% speedup).
+    # Must be applied after FSDP wrapping (if any) and before optimizer construction.
+    if cfg.train.get("compile", True) and not dist.is_initialized():
+        log.info("Compiling model with torch.compile (mode=reduce-overhead)...")
+        model = torch.compile(model, mode="reduce-overhead")
+
     # ---- Optimizer ----
     from rvm_eupe.optim.schedulers import cosine_warmup_schedule
 
@@ -160,6 +167,26 @@ def main(cfg: DictConfig) -> None:
         total_steps=cfg.train.scheduler.total_steps,
     )
 
+    # ---- Resume from checkpoint ----
+    global_step = 0
+    resume_path = cfg.get("checkpoint_path", None)
+    if resume_path and Path(resume_path).exists():
+        log.info(f"Resuming from checkpoint: {resume_path}")
+        ckpt = torch.load(resume_path, map_location=device)
+        model.load_state_dict(ckpt["model"], strict=False)
+        optimizer.load_state_dict(ckpt["optimizer"])
+        if "scheduler" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler"])
+        global_step = ckpt.get("step", 0)
+        # Re-apply encoder freeze/unfreeze state
+        if global_step < freeze_steps:
+            model.freeze_encoder()
+        else:
+            model.unfreeze_encoder()
+        log.info(f"Resumed at step {global_step}")
+    elif resume_path:
+        log.warning(f"checkpoint_path specified but not found: {resume_path}")
+
     # ---- Data ----
     from rvm_eupe.data.transforms import build_train_transforms
     transform = build_train_transforms(crop_size=cfg.data.crop_size)
@@ -172,7 +199,6 @@ def main(cfg: DictConfig) -> None:
 
     # ---- Training loop ----
     accum = cfg.train.accumulate_grad_batches
-    global_step = 0
 
     while global_step < cfg.train.scheduler.total_steps:
         for batch in loader:
